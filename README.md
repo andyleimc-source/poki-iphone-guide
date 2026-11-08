@@ -163,7 +163,55 @@ Bonjour 名称可适应局域网 IP 变化；临时用数字 IP 定位问题后�
 
 ## 7. 可选：后台常驻与跨网络
 
-最简单的方式是保留 `npm start` 终端。需要自动启动时，可由安装助手创建用户级 launchd 服务：使用本机 `node` 的绝对路径，工作目录设为 Poki 仓库，日志放用户私有目录并限制权限，保持默认回环监听。先确认没有现存服务再启用，不要盲目创建重复实例。更新源码后需要重启服务，旧进程不会自动加载新代码。
+最简单的方式是保留 `npm start` 终端。需要登录后自动启动时，先停止手动运行的 `npm start`，确认没有其他 Poki 服务使用同一端口，再执行：
+
+```sh
+python3 - <<'PYTHON'
+from pathlib import Path
+import os, plistlib, shutil
+home = Path.home()
+node = shutil.which('node')
+assert node, '先安装 Node.js'
+root = home / 'coding/poki'
+assert (root / 'src/daemon.mjs').is_file(), '先安装 Poki'
+logs = home / 'Library/Logs/PokiMCP'
+logs.mkdir(parents=True, exist_ok=True, mode=0o700)
+logs.chmod(0o700)
+for name in ['stdout.log', 'stderr.log']:
+    log = logs / name
+    log.touch(mode=0o600, exist_ok=True)
+    log.chmod(0o600)
+agents = home / 'Library/LaunchAgents'
+agents.mkdir(parents=True, exist_ok=True)
+path = agents / 'local.poki-mcp.plist'
+assert not path.exists(), '服务文件已存在，请检查，勿覆盖'
+path.write_bytes(plistlib.dumps({
+    'Label': 'local.poki-mcp',
+    'ProgramArguments': [node, str(root / 'src/daemon.mjs')],
+    'WorkingDirectory': str(root),
+    'EnvironmentVariables': {'PATH': os.environ.get('PATH', '/usr/bin:/bin')},
+    'RunAtLoad': True, 'KeepAlive': True, 'ThrottleInterval': 15,
+    'StandardOutPath': str(logs / 'stdout.log'),
+    'StandardErrorPath': str(logs / 'stderr.log'),
+}))
+path.chmod(0o600)
+print('服务配置已生成')
+PYTHON
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/local.poki-mcp.plist"
+launchctl print "gui/$(id -u)/local.poki-mcp"
+tail -n 5 "$HOME/Library/Logs/PokiMCP/stdout.log"
+```
+
+看到 `event: ready` 对应的 JSON 日志后，再从客户端验证。若此前使用自定义 `POKI_MCP_STATE_DIR`，也要把该值加入服务的 `EnvironmentVariables`，与客户端保持一致。
+
+更新源码后需要重启服务，旧进程不会自动加载新代码：
+
+```sh
+launchctl kickstart -k "gui/$(id -u)/local.poki-mcp"
+# 停止后台服务：
+# launchctl bootout "gui/$(id -u)/local.poki-mcp"
+```
+
 
 跨网络需要另行配置 Tailscale，按[官方远程连接说明](https://github.com/JosssphZhou/poki/blob/main/docs/remote-iphone.md)操作。该路径仍属实验功能，本指南没有验证蜂窝网络、外网远程或 Mac 关机独立运行。iPhone 上 Tailscale 与其他普通 VPN 可能冲突，不要直接覆盖已有网络配置。
 
