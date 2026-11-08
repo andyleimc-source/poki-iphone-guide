@@ -1,0 +1,8 @@
+.DS_Store
+__pycache__/
+.runtime/
+*.log
+.env*
+*.plist
+remote-devices.json
+mcp.json
